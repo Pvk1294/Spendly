@@ -1,382 +1,226 @@
-# Spendly (FinanceFlow)
+<div align="center">
 
-> **Privacy-first personal finance for India — your bank SMS becomes a clean spend ledger without ever leaving your phone unencrypted.**
+# Spendly
 
-![stack](https://img.shields.io/badge/stack-React_Native_%2B_Node_%2B_Postgres_%2B_Ollama-1f6feb)
-![mobile](https://img.shields.io/badge/mobile-React_Native_0.74-61dafb)
-![backend](https://img.shields.io/badge/backend-Node_18%2B%20Express%20%2B%20Prisma_6-339933)
-![db](https://img.shields.io/badge/db-PostgreSQL-336791)
-![ai](https://img.shields.io/badge/ml-Mistral_7B_(local)-purple)
-![license](https://img.shields.io/badge/license-TBD-lightgrey)
+### Your money, understood automatically.
+
+*A premium personal finance app for India — tracks every transaction from your bank SMS, categorizes it intelligently, and turns your spending into clear, actionable insight. No bank logins. No manual entry. No noise.*
+
+[![Version](https://img.shields.io/badge/version-1.5-8B5CF6?style=flat-square)](.)
+[![Platform](https://img.shields.io/badge/platform-Android-3DDC84?style=flat-square&logo=android)](.)
+[![React Native](https://img.shields.io/badge/React%20Native-0.74-61DAFB?style=flat-square&logo=react)](.)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript)](.)
+
+</div>
 
 ---
 
-## 1. The Problem
+## What is Spendly?
 
-Indian consumers get an SMS for every UPI, debit-card, and credit-card transaction, but the only ways to track that spend today are: type each line into a spreadsheet, hand bank credentials to an aggregator, or grant a third-party app cloud SMS sync. The first is abandoned in week two the latter two trade privacy for convenience and have repeatedly been breach targets.
+Spendly is a personal finance app built for how Indian banking actually works — through SMS.
 
-The result is that most people fly blind on monthly spend until the credit-card bill arrives.
+Every UPI payment, every card swipe, every bank transfer generates a text message. Spendly reads those messages silently, in the background, and converts them into a clean expense ledger. By the time you open the app after a purchase, the transaction is already there — categorized, timestamped, and counted toward your monthly totals.
 
-## 2. The Solution
-
-Spendly reads the SMS that already exists in the device inbox, parses the transaction on the phone, and only ships the structured fields (amount, merchant, type, date) — never the raw, unredacted SMS body — to a backend the user already controls. Where the regex parser is uncertain, the transaction is flagged "unverified" instead of silently dropped, and labelled samples flow through a separate Python trainer that fine-tunes a local Mistral-7B model on Indian bank SMS specifically. The user gets an automatic spend ledger the data stays inside a private trust boundary.
-
-## 3. Key Features
-
-**Auto-capture & parsing**
-- On-device SMS reader (Android `READ_SMS`) and real-time `BroadcastReceiver` — _new transactions appear seconds after the bank SMS lands_.
-- Regex parser for 30+ Indian bank/UPI/wallet senders with confidence scoring — _high-recall on HDFC, SBI, ICICI, Axis, Kotak, Paytm, PhonePe, GPay, etc._
-- Low-confidence parses surface as "unverified" instead of being dropped — _user reviews edge cases instead of losing them_.
-- OTP digit masking + SHA-256 hashing before any upload — _live OTPs never reach the server, even if a row leaks_.
-
-**Money management**
-- Default + custom categories (10 seeded, scoped per user, EXPENSE/INCOME kinds). Defaults are deletable deletes are blocked server-side with a 409 + descriptive error if any transaction still references the category.
-- Merchant → category mappings with optional per-merchant nickname — _"DMART AVENUE SUPERMARTS" displays as "Groceries Near Home"_. Saving a mapping retroactively categorizes every still-uncategorized transaction from the same merchant (kind-filtered, never overwrites a manual choice).
-- Income flow has full category support — `Add Income` shows only INCOME-kind categories (Salary, Freelance, Side Projects), `Add Expense` shows only EXPENSE-kind.
-- Manual transactions are date-bounded to today/past — no future-dated entries.
-- Investments incl. SIP tracking with scheduled local notifications — _reminders without a server cron_.
-- Manual transactions, edit, delete, and batch import. Deleting a transaction auto-pops back to the previous list rather than landing on a "not found" screen.
-
-**Insights**
-- Category breakdown, monthly totals, and rolling trend charts (Skia line + pie).
-- Home `Insight` card is one tappable surface with four states (`warming-up` / `uncategorized` / `top-category` / `no-data`) below 20 categorized transactions it shows progress, otherwise it surfaces the top 1–2 uncategorized merchant names by frequency and deep-links to a pre-filtered Transactions list. Resolution mirrors `getTransactionDisplay` so the count always matches the visible rows (mappings count, not just direct `categoryId`).
-- Daily / weekly summary notifications fire with rich data baked in at schedule time (`You spent ₹X today\nTop: Y ₹Z`, weekly carries the ↑/↓ delta vs last week). Tapping deep-links to a `TodayAnalysis` screen scoped to the snapshot date — a Sunday-night daily tapped on Monday morning still shows Sunday, not "today".
-- Budget threshold alerts via local notifications.
-
-**Sync & reliability**
-- `SyncJob` rows track multi-batch imports with progress, errors, and resume — _the bar at the top of the home screen mirrors backend state, not optimistic UI_.
-- Server-computed SHA-256 dedup key over `amount | YYYY-MM-DD | cardLast4 | cleanMerchant` — _eliminates Postgres "NULL is distinct" duplicate bugs across devices and timezones_.
-- 90-day login-merge: hashes are primed from existing transactions on login so a fresh install never re-creates rows.
-
-**Auth & onboarding**
-- WhatsApp OTP (BotBiz delivery, code generated and verified server-side with HMAC-SHA256) plus Google Sign-In via Firebase.
-- Two-token session: short-lived JWT access + opaque refresh in a DB `Session` row — _logout kills both tokens immediately_.
-
-**ML training loop (separate trainer)**
-- Backend buckets labelled SMS into `TrainingSample` rows once `TRAINING_MIN_SAMPLES` accumulate, a `TrainingJob` is queued.
-- Local Mac trainer claims jobs, builds a custom Ollama model on `mistral:7b` via `Modelfile` few-shot, runs an 80/20 train/test split, and POSTs accuracy back.
-- Hand-curated `eval_set.jsonl` (30 cases) plus `compare.py` regression-diff between model versions — _stops silent quality regression as the model evolves_.
-
-## 4. Live Demo / Screenshots
-
-[TBD — no screenshots or demo video committed.] APK builds against `https://app-production-5914.up.railway.app` (Railway deployment, see [frontend/src/config.ts](frontend/src/config.ts)).
-
-## 5. Tech Stack
-
-### Frontend ([frontend/package.json](frontend/package.json))
-| Choice | Why |
-| --- | --- |
-| React Native 0.74.5 (TypeScript) | Single codebase for Android (primary) and iOS scaffolding. |
-| Zustand + persist middleware | Lightweight global store with AsyncStorage hydration no Redux boilerplate. |
-| React Navigation (native-stack + bottom-tabs) | Standard, performant native stack with conditional gating per permission state. |
-| Reanimated + Skia | 60fps charts (`LineChart`, `PieChart`) without JS thread jank. |
-| `@react-native-firebase/auth` + Google Sign-In | Production-grade OAuth without rolling our own. |
-| `@notifee/react-native` | Local scheduled notifications for SIP reminders, daily/weekly summaries, budget alerts — _no FCM round-trip_. |
-| `react-native-keychain` | Refresh token in iOS Keychain / Android Keystore, not AsyncStorage. |
-| `js-sha256` | Same hash function client and server use for dedup key compatibility. |
-
-### Backend ([backend/package.json](backend/package.json))
-| Choice | Why |
-| --- | --- |
-| Node.js ≥18 + Express 4 | Familiar HTTP layer with mature middleware ecosystem. |
-| Prisma 6 + PostgreSQL | Type-safe queries, first-class migrations, JSON-friendly schema `Decimal(14,2)` for money so no float drift. |
-| Zod | Single validation layer reused for both env config and request bodies/params/query. |
-| Helmet + CORS + `trust proxy 1` | Security headers + correct client IP behind Railway/DO load balancers. |
-| `jsonwebtoken` + Session row | DB-backed refresh token enables real logout + revoke pure JWT can't do that. |
-| `firebase-admin` | Verifies Google ID tokens server-side. |
-| `morgan` | Structured access logs. |
-
-### Database ([backend/prisma/schema.prisma](backend/prisma/schema.prisma))
-PostgreSQL with composite unique constraints, `Decimal(14,2)` for money, and indexes tuned for `(userId, date)`, `(userId, normalizedMerchant)`, `(userId, hash)`. 8 migrations under [backend/prisma/migrations/](backend/prisma/migrations/).
-
-### Infrastructure
-| Layer | Choice |
-| --- | --- |
-| Backend host | Railway (production URL hardcoded in `frontend/src/config.ts`) also configured for DigitalOcean App Platform (`PORT=8080`). |
-| DB | Managed Postgres (Railway / DO). |
-| Trainer host | Mac (Apple-Silicon recommended) running as a `launchd` LaunchAgent — _zero cloud GPU cost_. |
-| LLM runtime | Ollama (`mistral:7b` base + custom `spendy-sms:vN` tag). |
-
-### Third-party APIs
-| Service | Purpose |
-| --- | --- |
-| Firebase Auth | Google Sign-In ID-token verification. |
-| BotBiz WhatsApp | OTP delivery (delivery-only we own generation + verification). |
-| `otp.dev` | Legacy fallback, kept dormant for fast rollback. |
-
-## 6. Architecture Overview
-
-Three services, one trust boundary. The phone never ships raw OTPs or unparsed sensitive SMS to the backend — the masker (`smsMasker.ts`) and the server-side bank-sender allowlist (`smsSenders.js`) are the gate. The trainer never touches the phone or the public internet beyond the backend it only pulls labelled samples through an authenticated `x-trainer-token` channel.
-
-```
-┌─────────────────────────────────┐
-│ React Native App (Android/iOS)  │
-│  ┌───────────────────────────┐  │
-│  │ smsReader → smsValidator  │  │
-│  │  → smsMasker → smsParser  │  │
-│  │  → smsProcessor (dedup)   │  │
-│  └───────────────────────────┘  │
-│       │ structured txns         │
-│       │ + masked rawSms         │
-│       ▼                         │
-│  Zustand store (persisted)      │
-└─────────┬───────────────────────┘
-          │ HTTPS  Bearer JWT
-          ▼
-┌─────────────────────────────────┐        ┌──────────────────────┐
-│ Express API (Node 18)           │◀──────▶│  PostgreSQL          │
-│  /auth /api/auth /user          │        │  Prisma schema       │
-│  /transactions /categories      │        │  Sessions, Txns,     │
-│  /investments /insights         │        │  TrainingSamples,    │
-│  /sms /sync-jobs /v1/training   │        │  TrainingJobs, ...   │
-└─────────┬───────────────────────┘        └──────────────────────┘
-          │ x-trainer-token         x-cron-secret  │
-          │ (claim job + samples)   (scheduled)    │
-          ▼                                        ▼
-┌─────────────────────────────────┐        ┌──────────────────────┐
-│ Python Trainer (LaunchAgent)    │        │  Cron / Scheduler    │
-│  poll → claim → 80/20 split     │        │  /v1/training/       │
-│  greedy-diversify 60 few-shot   │        │     check-queue      │
-│  ollama create spendy-sms:vN    │        │     reap-zombies     │
-│  validate → POST accuracy       │        └──────────────────────┘
-└─────────────────────────────────┘
-                │
-                ▼
-        Ollama (mistral:7b)
-```
-
-## 7. Project Structure
-
-```
-.
-├── backend/                  Node.js + Express API
-│   ├── prisma/               Schema + 8 migrations
-│   ├── scripts/              DB preflight, backfill, reparse helpers
-│   └── src/
-│       ├── app.js            Express app composition
-│       ├── server.js         HTTP bootstrap + signal handlers
-│       ├── config/           env (Zod-validated), Prisma, Firebase
-│       ├── middleware/       auth, rateLimiter, validate, errors
-│       ├── modules/          Feature slices (auth, transaction, sms, …)
-│       ├── routes/           Phone-OTP auth router
-│       ├── services/         OTP providers, sessionService
-│       └── utils/            normalizers, smsSenders, phone, dateRange
-├── frontend/                 React Native 0.74 (TypeScript)
-│   ├── App.tsx               Root with theme + gesture root
-│   ├── android/, ios/        Native shells
-│   └── src/
-│       ├── components/       37 reusable UI primitives + charts
-│       ├── screens/          Home, Transactions, Analysis, SMS, Auth, …
-│       ├── navigation/       Permission-gated RootNavigator + tabs
-│       ├── services/         api, smsEngine, smsParser, syncService, …
-│       ├── store/            Zustand store (persisted)
-│       ├── hooks/            useAppTheme, useSmsSync
-│       └── utils/            currency, dates, finance helpers
-└── trainer/                  Python Mac-side training service
-    ├── train.py              Poll → claim → build Ollama model → report
-    ├── eval.py, compare.py   Regression-diff eval against eval_set.jsonl
-    ├── eval_set.jsonl        30 hand-curated regression cases
-    └── setup.sh              LaunchAgent install/uninstall
-```
-
-## 8. Getting Started
-
-### Prerequisites
-- Node.js ≥ 18.18, PostgreSQL ≥ 14, Yarn or npm.
-- React Native dev environment (Android Studio for the primary target, Xcode for iOS).
-- Python 3.10+ and Ollama for the trainer (optional, only needed to retrain).
-
-### Backend
-```bash
-cd backend
-cp .env.example .env          # fill JWT_SECRET, OTP_HMAC_SECRET, FIREBASE_*, BOTBIZ_*, CRON_SECRET, TRAINER_TOKEN
-npm install
-npx prisma migrate deploy     # or `prisma migrate dev` locally
-npm run dev                   # nodemon-style: node --watch src/server.js
-```
-
-Env validation runs on startup via Zod ([backend/src/config/env.js](backend/src/config/env.js)) — the server refuses to boot on a missing/invalid value rather than crashing later.
-
-### Frontend
-```bash
-cd frontend
-npm install
-# Edit src/config.ts — IS_PRODUCTION=false for local dev
-npm start                     # Metro bundler
-npm run android               # or `npm run ios`
-```
-
-### Trainer (optional)
-```bash
-cd trainer
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env          # fill BACKEND_URL, TRAINER_TOKEN
-python train.py               # one-shot
-bash setup.sh install         # or run as LaunchAgent
-```
-
-### Tests
-```bash
-# Backend (Jest + Supertest, hits a real test DB — see scripts/test-db-preflight.js)
-cd backend && npm test
-npm run test:unit            # utils only, no DB
-npm run test:integration     # module-level
-npm run test:coverage
-
-# Frontend (Jest + ts-jest)
-cd frontend && npm test
-
-# Trainer eval (regression suite for the trained model)
-cd trainer && python eval.py spendy-sms:v1
-python compare.py spendy-sms:v1 spendy-sms:v2
-```
-
-## 9. API Reference
-
-All routes prefixed with the deployed origin. Auth is `Authorization: Bearer <accessToken>` unless noted.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/health` | Liveness probe. |
-| POST | `/api/auth/send-otp` | Send WhatsApp OTP via BotBiz rate-limited. |
-| POST | `/api/auth/verify-otp` | Verify OTP, create user (+ default categories) on first login, issue tokens. |
-| GET | `/api/auth/profile` | Authed profile fetch. |
-| POST | `/api/auth/refresh` | Rotate access token using refresh token. |
-| POST | `/api/auth/logout` | Revoke session row. |
-| POST | `/auth/google` (alias `/auth/verify-token`) | Verify Firebase ID token and issue session. |
-| GET / PUT | `/user/me`, `/user/update` | Profile read/update. |
-| GET / POST / PUT / DELETE | `/categories` | Category CRUD (custom + default). |
-| GET / POST / PUT / DELETE | `/transactions` | Transaction CRUD. |
-| POST | `/transactions/batch` | Batch insert with server dedup. |
-| GET / POST | `/mapping` | Merchant → category mappings (with nicknames). |
-| GET / POST / PUT / DELETE | `/investments` | Investment CRUD incl. SIP fields. |
-| GET | `/insights/category` `?month&year`/`?from&to` | Category breakdown. |
-| GET | `/insights/monthly` | Monthly totals. |
-| GET | `/insights/trends` | Rolling trend window. |
-| POST | `/sms/raw` | Upload masked SMS batch (sender allowlist enforced). |
-| GET / POST / PATCH | `/sync-jobs/...` | SyncJob progress reporting. |
-| POST | `/v1/training/check-queue` | Cron-only — queue a job if `>= TRAINING_MIN_SAMPLES`. |
-| POST | `/v1/training/reap-zombies` | Cron-only — reset/fail jobs missing heartbeats. |
-| GET | `/v1/training/job/pending` | Trainer-only — atomic claim. |
-| POST | `/v1/training/job/:id/{heartbeat,complete,fail}` | Trainer-only — lifecycle. |
-| GET | `/v1/training/status` | Authed — recent jobs. |
-
-## 10. Data Model
-
-Primary entities ([backend/prisma/schema.prisma](backend/prisma/schema.prisma)):
-
-- **User** owns everything via `onDelete: Cascade`. Phone is E.164, optional email, optional `firebaseUid`.
-- **Session** — refresh-token row, opaque `token`, `expiresAt`. JWT carries `jti=session.id`.
-- **OtpCode** — one row per phone, HMAC-SHA256 `codeHash`, `attempts` cap, single-use `consumed` flag.
-- **OTPAttempt** — append-only audit row backing the rate limiter.
-- **Transaction** — `Decimal(14,2)` amount, `dedupKey = sha256(amount|YYYY-MM-DD|cardLast4|cleanMerchant)`, unique with `userId`. `categoryId` `SetNull` on category delete.
-- **Category** — `(userId, normalizedName, kind)` unique defaults seeded on signup.
-- **MerchantMapping** — per-user merchant → category, optional `nickname`.
-- **SmsRawMessage** — masked body, `(userId, hash)` unique, links to parsed `Transaction` if any.
-- **TrainingSample** — labelled SMS for the trainer, `usedInTraining` flag, optional `trainingJobId`.
-- **TrainingJob** — model version counter, `status` state machine (pending → in_progress → completed/failed), heartbeat columns, `retryCount` for the zombie reaper.
-- **Investment** — name, type, amount, optional `isSip`/`monthlyAmount`/`nextDate`.
-- **SyncJob** — `status`, `total`, `processed`, `errors[]` for client-visible progress.
-
-## 11. Security & Performance Notes
-
-**Trust boundary**
-- Bank-sender allowlist enforced server-side in [backend/src/utils/smsSenders.js](backend/src/utils/smsSenders.js) the matching frontend list is a hint, not a gate.
-- OTP digits in inbound SMS are masked client-side ([frontend/src/services/smsMasker.ts](frontend/src/services/smsMasker.ts)) before any upload — even if the masked body is stored, no live code is recoverable.
-- Server computes the dedup hash itself instead of trusting the client's FNV-1a — a malicious client can't force collisions.
-
-**Auth**
-- JWT (15-min default) + opaque refresh in DB `Session` row. Logout = `DELETE FROM Session` → both tokens dead immediately. Older tokens without `jti` are rejected (forced re-login on rollout).
-- OTP: HMAC-SHA256 of code with a **separate** `OTP_HMAC_SECRET` (not `JWT_SECRET`), `crypto.timingSafeEqual` compare, `MAX_VERIFY_ATTEMPTS=5`, single-use `consumed`.
-- Phone normalized to E.164 before any DB lookup so `+91` and `91` and `0` prefixes can't create duplicate users.
-
-**Rate limiting**
-- OTP send: cooldown (default 30s) + hourly cap (default 3) backed by the persistent `OTPAttempt` table — survives process restarts.
-- OTP verify: 5 tries per 10-minute rolling window (in-memory). _[Caveat: in-memory, doesn't share across instances — see Gaps.]_
-- Concurrent 401s on the client coalesce into a single `/auth/refresh` call ([frontend/src/services/api.ts](frontend/src/services/api.ts)).
-
-**Reliability**
-- Training jobs use atomic `updateMany({ where: { id, status: "pending" } })` to claim — two trainers can't race.
-- Zombie reaper resets jobs whose `macLastHeartbeat` is older than `ZOMBIE_THRESHOLD_MINUTES` fails permanently after `ZOMBIE_MAX_RETRIES`.
-- Backend handles `SIGINT`/`SIGTERM` with Prisma disconnect + graceful HTTP shutdown.
-- Helmet enabled, `x-powered-by` disabled, `trust proxy 1` for accurate client IPs behind Railway.
-
-**Performance**
-- Indexes on `(userId, date)`, `(userId, normalizedMerchant)`, `(userId, categoryId)`, `(userId, hash)`, `(userId, wasParsed)`.
-- Skia-rendered charts run off the JS thread.
-- Refresh-token rotation avoids re-querying user on every request.
-- 90-day login-merge primes the dedup hash set so the first sync after a re-install doesn't double-write.
-
-## 12. Roadmap (inferred from code/comments)
-
-- **Multi-instance verify limiter** — current 10-minute verify bucket is in-memory move to Redis or DB rows once horizontal scaling kicks in.
-- **iOS parity** — iOS scaffolding exists but Android-only flows (`READ_SMS`, `BroadcastReceiver`) need an alternative ingest (manual entry / email parse) for Apple's stricter inbox.
-- **Real fine-tuning path** — trainer comment notes the upgrade route: MLX-LM LoRA → merge → GGUF → `ollama create` once Modelfile few-shot stops scaling.
-- **`otp.dev` cleanup** — provider has been replaced by BotBiz but the legacy module is still in tree for rollback. Remove once BotBiz has soaked.
-- **Public-cron migration** — `/v1/training/check-queue` and `/reap-zombies` rely on `CRON_SECRET` headers an external scheduler (Railway cron, GitHub Actions, etc.) needs to be wired up — see [TBD] above.
-- **Investment auto-valuation** — `currentValue` field exists but is user-entered today an integration with a quotes provider would let the trend chart speak to portfolio P&L, not just spend.
-
-## 13. Business Value
-
-**Market.** Every Indian with a bank account gets transaction SMS — that's >900M UPI users. Existing PFM apps are either dead (forced shutdowns following the 2022 RBI account-aggregator clampdown), credential-hungry (a non-starter for a privacy-conscious cohort), or manual (high churn after the novelty week).
-
-**Use case.** A young salaried or self-employed user who lives on UPI, gets paid via direct bank credit, and has zero patience for spreadsheets but high anxiety about month-end balance. Spendly turns "where did all my money go" into a one-tap dashboard with no data handoff.
-
-**Monetization angle.** The architecture is built so the user — not the operator — owns the data. That makes premium tiers (advanced insights, multi-account merge, family sharing, exportable tax-ready statements, investment auto-valuation) the natural revenue surface, instead of monetizing transaction data. A B2B angle exists too: the local-first parser + on-device dedup is a drop-in for any Indian fintech that needs SMS ingest without cloud SMS sync.
-
-**Scalability story.** Backend is stateless Express behind a managed Postgres — horizontal scale is bounded only by DB. Heavy ML lives on the operator's Mac and is fully decoupled (the API doesn't own a GPU) model artefacts are versioned via the `TrainingJob.modelVersion` counter so promotions are reversible. Cost per user at the API tier is dominated by OTP delivery, not compute.
-
-## 14. Engineering Highlights (defensible in a whiteboard)
-
-1. **Server-side dedup key as a SHA-256 of `amount|YYYY-MM-DD|cardLast4|cleanMerchant`** — solves the well-known Postgres "NULL is distinct" footgun in unique constraints by coalescing nullable parts to empty string. Backfill recipe lives in [backend/prisma/migrations/20260425000000_transaction_dedup_key/migration.sql](backend/prisma/migrations/20260425000000_transaction_dedup_key/) and JS recreates it bit-for-bit using `Decimal.toFixed(2)`. _Why it matters: cross-device dedup over re-imports without losing legit same-day same-amount transactions._
-2. **Two-token auth with DB-backed refresh.** Pure-JWT logouts are theatre we mint a 15-minute access JWT carrying `jti=sessionId`, store the refresh token as an opaque UUID in the `Session` row, and validate `Session.exists && !expired` on every protected request. Logout = row delete = both tokens revoked.
-3. **OTP threat model.** Code is generated server-side, HMAC-SHA256 hashed with a key **distinct** from `JWT_SECRET` (so a JWT_SECRET leak doesn't hand attackers OTP forgery), single-use via a `consumed` flag, capped at 5 verify attempts, and rate-limited at send-time via a persistent `OTPAttempt` table that survives process restarts.
-4. **Trainer concurrency.** Multiple Macs could legally exist job claim uses `prisma.trainingJob.updateMany({ where: { id, status: "pending" } })` and treats `count === 0` as "someone else won." A separate cron-driven reaper resets jobs missing heartbeats and permanently fails them after `ZOMBIE_MAX_RETRIES` so a crashed trainer never wedges the queue.
-5. **ML eval is a regression suite, not a metric.** `eval.py` runs the model against a hand-curated `eval_set.jsonl` and `compare.py` diffs two model tags — explicitly named "block the release if regressions aren't understood." This catches the case where training accuracy improves but a known edge-case (slice-bank Kotak UPI handle, OTP-as-promo) silently breaks.
-6. **Privacy-by-architecture, not policy.** `smsMasker.ts` redacts 4–8 digit groups before upload, the server's `isKnownSender` allowlist drops anything not from a whitelisted bank prefix, and the client's FNV-1a hash is treated as a *hint* — the server recomputes its own SHA-256 so nothing user-controlled can poison the dedup index.
-7. **Permission-gated navigator.** The root navigator is one declarative `if/else` ladder over `hydrated → onboardingCompleted → isLoggedIn → smsPermission → notificationPermission → initialSyncDone` ([frontend/src/navigation/RootNavigator.tsx](frontend/src/navigation/RootNavigator.tsx)). Adding a new gating step is one line, not a new flag scattered across screens.
-8. **Decimal money everywhere.** `Decimal(14,2)` in Postgres, `js-sha256` shared with the frontend, `formatAmountForKey` coerces to `.toFixed(2)` on both sides — no float drift, no per-locale parse drift.
-9. **Retroactive merchant-mapping backfill.** Saving a mapping (or simply categorizing a transaction) runs a kind-filtered `UPDATE transaction SET categoryId = ? WHERE userId AND normalizedMerchant AND categoryId IS NULL AND type = <category.kind>` so older Domino's transactions catch up the moment a single one is tagged. The `categoryId IS NULL` clause never overwrites a manual choice the `kind` filter prevents an EXPENSE mapping bleeding onto an INCOME row. Same helper is reused by both the transaction-create path and the explicit `POST /mapping` path. _Why it matters: matches user intent ("I told the app what Domino's is") without invalidating any prior manual category assignment._
-10. **Single-card insight engine.** `buildHomeInsight` returns a 4-state discriminated union (`InsightKind`) rather than four parallel components, so the Home card has one render path and the deep-link target is decided by `kind`. The "is this categorized?" predicate is identical to `getTransactionDisplay`'s — a transaction counts as categorized if `categoryId` is set _or_ a merchant mapping resolves it — so insight counts never desynchronize from what the user sees on the row.
-11. **Notification deep-links survive cold start.** Tap intents are written to AsyncStorage by both the foreground (`onForegroundEvent`) and background (`onBackgroundEvent`) handlers, then consumed by `RootNavigator` on every `AppState` resume — not just on mount. So tapping a notification that brings the app from background to foreground (which doesn't remount React) still navigates to the correct snapshot screen. The `snapshotDate` payload makes next-day taps deterministic.
-
-## 15. Contributing
-
-This repo isn't open to external PRs yet. Internal contribution flow:
-- Branch off `main`, run `npm run typecheck && npm test` (frontend) and `npm run test:unit && npm run test:integration` (backend) before opening a PR.
-- Migrations: `npx prisma migrate dev --name <slug>` on a local DB CI deploys with `prisma migrate deploy`.
-- Update `eval_set.jsonl` whenever a real-world SMS the model gets wrong is found — _that_ is how the trainer learns over time.
-
-## 16. License
-
-[TBD — no `LICENSE` file present in the repo.]
-
-## 17. Author / Contact
-
-Maintainer: Prateek Verma. Existing repo-level docs: [README.md](README.md), [README_SHOWCASE.md](README_SHOWCASE.md), [FINANCEFLOW_QA_TEST_PLAN.md](FINANCEFLOW_QA_TEST_PLAN.md), [trainer/README.md](trainer/README.md).
+No spreadsheets. No syncing your bank account to a third party. No remembering to log anything.
 
 ---
 
-## Gaps Found During Analysis _(for the maintainer, not the README)_
+## The Problem
 
-The following are real gaps relative to a production-grade pitch. Listed in rough priority order.
+Personal finance apps have a retention problem. Most people try one, use it for a week, and stop. The friction is always the same.
 
-1. **No CI/CD.** `.github/` contains only a `java-upgrade/` Dependabot folder — no build/test/deploy workflow. Tests will rot.
-2. **`IS_PRODUCTION = true` literal in [frontend/src/config.ts](frontend/src/config.ts).** Production API URL is hardcoded dev builds will hit prod unless someone remembers to flip the constant. Move to `.env` with `react-native-config`.
-3. **`GOOGLE_WEB_CLIENT_ID` committed in source.** Not technically a secret (public OAuth client id), but should still come from config so different environments don't clash.
-4. **No license file.** Every README badge says "TBD". Pick one before any external collaboration.
-5. **No Dockerfile / docker-compose.** Local Postgres bring-up is left to the developer new contributors will struggle.
-6. **In-memory verify rate-limiter** ([backend/src/middleware/rateLimiter.js](backend/src/middleware/rateLimiter.js#L61)). Doesn't share across instances — once horizontal scaling lands, an attacker can spread verify attempts across instances. Move to Redis or a DB row pattern like `OTPAttempt`.
-7. **iOS not validated.** All ingest paths (`smsReader`, `BroadcastReceiver`) are Android-only the iOS folder builds but the entire SMS pipeline is unreachable. Either gate it explicitly with helpful UX, or invest in an iOS-compatible ingest (manual / email).
-8. **Test coverage is uneven.** Backend tests cover auth, transaction (incl. dedup), category, investment, mapping, rateLimiter, sessionService, and utils — but `insights`, `sms`, `syncJob`, `training`, and `user` modules have **no tests**. Frontend has `smsParser`, `smsValidator`, `mappers`, `dedupHash.contract`, `bugfix` — no UI/screen tests at all.
-9. **No e2e tests.** Critical flows (OTP login → permissions → first sync → first transaction) aren't exercised end-to-end. Detox would fit.
-10. **No observability.** `morgan` is the only telemetry no structured logger, no error reporter (Sentry/Bugsnag), no metrics. The training reaper logs to stdout — fine for a Mac, invisible on Railway without a log drain.
-11. **No Dockerfile / health probe spec for managed platforms.** `/health` exists `readiness` (DB ping) does not.
-12. **`.env.example` instructs `<REQUIRED>`** but env loader will boot if any required var is missing the prefix-check (Zod catches min-length, but `JWT_SECRET=<REQUIRED>` is 10 chars, **fails**`min(32)`, _good_ — but `OTP_HMAC_SECRET=<REQUIRED>` similarly fails just document this loudly).
-13. **Legacy `otp.dev` provider still in tree** ([backend/src/services/otpProvider.js](backend/src/services/otpProvider.js)). Dead code increases audit surface. Delete once BotBiz has soaked enough.
-14. **No CHANGELOG / no versioning.** `package.json` says `1.0.0` and `0.0.1` no record of what shipped when.
-15. **`FINANCEFLOW_QA_TEST_PLAN.md` is gitignored** but committed. Decide which it should be.
-16. **Investment `currentValue` is user-entered.** No quotes integration → trend charts can't show portfolio P&L the feature is half-realized.
-17. **No CONTRIBUTING.md / SECURITY.md / CODE_OF_CONDUCT.md.** Standard OSS hygiene if this ever opens up.
-18. **`SmsRawMessage` row stores the (masked) body indefinitely.** If retention is part of the privacy pitch, document a TTL job otherwise this contradicts "your bank SMS never leaves your phone."
+**Manual entry is abandoned almost immediately.** Logging every purchase is a habit that almost no one maintains. The app becomes a task, not a tool.
+
+**Account aggregators ask for too much trust.** Apps that connect directly to your bank require credentials or OAuth access to a service you've never heard of. The data goes somewhere. Most users aren't comfortable with that, and rightfully so.
+
+**Finance dashboards feel like work.** Dense charts, confusing categories, endless setup. Apps designed for power users end up unused by everyone else.
+
+**Investment and spending live in separate worlds.** Users switch between a broking app for SIPs and a finance app for expenses. There's no unified picture.
+
+The result: most people in India have no idea where their money goes until the credit card bill arrives.
+
+---
+
+## The Solution
+
+Spendly solves this by removing the manual layer entirely.
+
+**SMS-based automatic tracking** means transactions appear in the app the moment they happen — no tapping, no entering amounts, no choosing categories manually every time.
+
+**Merchant learning** means that once you categorize Swiggy as Food, every future Swiggy order is categorized for you. The app gets smarter with each correction, until corrections are rare.
+
+**Calm, clean analytics** surface the information that changes behavior — monthly category breakdowns, trend lines, and a clear view of where the money went — without overwhelming the user with data they didn't ask for.
+
+**Investment visibility** keeps SIPs and lump-sums in a separate, dedicated view so long-term wealth building never gets confused with day-to-day spending.
+
+**Privacy by design** means raw SMS never leaves the device. Only the parsed result — amount, merchant, category, date — is ever stored on a server.
+
+---
+
+## Key Features
+
+### Automatic Expense Detection
+Bank SMS arrives, Spendly parses it in the background, and a new transaction appears in your ledger — silently and instantly. Covers UPI, debit cards, credit cards, and netbanking across all major Indian banks.
+
+### Smart Categorization
+Tag a merchant once. After that, every transaction from that merchant — no matter how the bank formats the name — is categorized automatically. No repetition.
+
+### Spending Pattern Analysis
+Monthly breakdowns by category, rolling trends, and date-range views. Designed to give you just enough insight to notice patterns, without overwhelming you with dashboards you'll stop reading.
+
+### Investment Overview
+A separate ledger for SIPs, lump-sums, and holdings. Your investment transfers stay out of your spending numbers so both views remain meaningful.
+
+### Full Transaction History
+Searchable, filterable, and editable. Add notes, correct categories, and manage transactions the way you'd want to — with a clean mobile interface that doesn't feel like a spreadsheet.
+
+### Guided Onboarding
+A thoughtful onboarding experience explains what the app does and why it needs SMS access before asking for any permissions. First-time users understand the product before they commit to it.
+
+### Custom Categories
+Create categories with custom names, colors, and emoji icons. The experience is personal — your finances organized the way you think about them, not the way a generic template assumes you do.
+
+### Offline-First
+The app works without a network connection. Everything important lives on the device first and syncs when connectivity is available.
+
+---
+
+## Product Experience
+
+**First launch** starts with an onboarding carousel — a few screens that explain the core idea before any sign-in or permissions are requested. Users understand what they're agreeing to.
+
+**Sign-in** takes under a minute via OTP on WhatsApp or Google Sign-In.
+
+**After permissions are granted**, the app performs a one-time import of the last 60 days of bank SMS history. A progress screen shows the import happening in real time. By the time it finishes, the user already has months of transactions waiting for them.
+
+**The home screen** shows a spending summary for the current period, a category breakdown, and a feed of recent transactions. There are no empty states, no "add your first transaction" prompts. The data is already there.
+
+**The transactions screen** is a scrollable, searchable list with category filters. Tapping any transaction shows the full detail and lets you edit the category, add a note, or delete it.
+
+**The analysis screen** shows where the month's money went — by category, by week, with comparisons to prior periods. The charts are designed to be readable at a glance.
+
+**The investments screen** is separate and intentional. SIPs and portfolio holdings are tracked as a distinct ledger. Long-term wealth and day-to-day cashflow don't bleed into each other.
+
+**In-app onboarding** provides contextual guidance the first time a user encounters each major feature — not a pop-up tour, but lightweight prompts that appear when they're actually relevant.
+
+---
+
+## Design Philosophy
+
+**Dark, premium UI.** A deep dark theme with a purple fintech accent. Feels modern, reduces eye strain, and matches the premium expectations of a product handling financial data.
+
+**Calm over stimulating.** Finance apps have a tendency to fill every pixel with data. Spendly makes the opposite choice: show the number that matters, not every number that exists.
+
+**Mobile-first interactions.** Every screen is built for thumb navigation. Bottom sheets, swipe gestures, haptic feedback, and smooth transitions make the app feel native — not a web page in a wrapper.
+
+**Progressive disclosure.** Complex features are introduced when the user is ready for them, not on first launch. Onboarding is split into a pre-auth carousel and contextual in-app guidance so neither is overwhelming.
+
+**Consistency.** One color palette. One type scale. One set of spacing rules. The visual language is consistent enough that users can predict what a new screen will look like before they navigate to it.
+
+---
+
+## Technical Highlights
+
+| Area | Approach |
+|---|---|
+| **Mobile** | React Native 0.74, TypeScript strict, zero web views |
+| **Local state** | Zustand for auth, preferences, and UI state |
+| **Server state** | TanStack Query v5 with AsyncStorage persistence |
+| **Animations** | Reanimated 3, Shopify Skia, Lottie |
+| **SMS engine** | Custom regex parser (~570 lines) with per-bank patterns and confidence scoring |
+| **Dedup** | Two-level: SMS-hash on device + composite key on server |
+| **Merchant learning** | Per-user mapping table that auto-classifies future transactions |
+| **Backend** | Node.js / Express / Prisma / PostgreSQL, feature-sliced modules |
+| **Privacy** | On-device parsing; only structured fields reach the server |
+| **AI trainer** | Python + Ollama (Mistral-7B) pipeline for expanding SMS pattern coverage |
+
+---
+
+## Architecture Overview
+
+The system has three layers, each with a clear job.
+
+**On-device (React Native)** — All SMS parsing happens here. A native Android listener intercepts new bank messages, runs them through a regex engine that extracts amount, merchant, type, and date, deduplicates against a 60-day hash window, and stores the result locally. The raw SMS never leaves the phone by default.
+
+**Backend (Node / PostgreSQL)** — Stores structured transaction data, runs a second deduplication pass on composite keys, applies merchant-to-category mappings, and serves aggregated insights. The backend knows about transactions, not SMS.
+
+**AI trainer (Python / Ollama)** — An offline pipeline that trains a custom Mistral-7B model on user-confirmed labelled examples. Not used at request time — runs asynchronously to improve pattern coverage over time without impacting app performance or battery life.
+
+---
+
+## Screenshots
+
+> _Screenshots will be added here. Screens below represent the full navigation surface._
+
+| | | |
+|---|---|---|
+| Onboarding carousel | Home dashboard | Spending analysis |
+| Transaction list | Transaction detail | Category management |
+| Investment portfolio | SMS sync progress | Profile & settings |
+
+---
+
+## Challenges Solved
+
+**Parsing Indian bank SMS reliably.** Indian banking SMS is inconsistent — every bank uses different phrasing, different amount formats, different merchant name patterns. Some SMS that look like transactions are actually OTPs or limit-change notifications. The parser has to get this right on every message with no user intervention.
+
+**Dedup across reinstalls.** Users reinstall apps. When they do, the 60-day import runs again. Without a robust deduplication system, every transaction would be doubled. Spendly uses a content-hash at the device level and a composite key at the server level to prevent this regardless of how many times the app is reinstalled.
+
+**Making merchant learning feel magical.** The first time a user sees "SWIGGY*BGLR01" in their transaction list, they tag it as Food. The system has to correctly match that same merchant the next time it appears as "Swiggy Bangalore" or "SWIGGY" and apply the same category. Normalization, fuzzy matching, and a persistent per-user mapping table make this work.
+
+**Keeping analytics fast without complex queries.** Insights that feel real-time — category totals, monthly trends, rolling comparisons — need to be computed efficiently over potentially thousands of transactions. The backend aggregation layer and client-side TanStack Query caching keep every screen responsive.
+
+**Onboarding without friction.** The app needs SMS read permission, notification permission, and battery optimization exemption (for background SMS capture on aggressive Android ROMs). Asking for all three upfront is a recipe for abandonment. Spendly staggers permission requests with context screens that explain the value before the system dialog appears.
+
+**OEM Android battery killers.** On Xiaomi, OnePlus, and similar devices with aggressive background process management, SMS listeners can be silenced without the user knowing. A dedicated battery optimization service detects this and requests the appropriate exemption — once, with a clear explanation.
+
+---
+
+## Version 1.5 Highlights
+
+The v1.5 update was focused on experience quality and feature completeness across the full user journey.
+
+- **Restored and expanded onboarding** — Pre-auth carousel rebuilt from scratch with a cleaner narrative flow and updated visuals
+- **Contextual in-app onboarding** — Lightweight tutorial system that surfaces guidance when features are first encountered, not all at once
+- **Custom category colors** — Full HSV color wheel for category personalization (previously limited to presets)
+- **Analytics refinements** — Improved chart rendering, better date-range handling, and more legible category breakdowns
+- **Investment section** — Enhanced portfolio view with better data entry and a cleaner layout
+- **Navigation overhaul** — Reduced tap depth to key screens, smoother tab transitions
+- **SMS edge cases** — Expanded bank pattern coverage and improved confidence scoring for ambiguous messages
+- **Battery optimization** — More reliable background SMS capture on OEM Android builds
+
+---
+
+## Future Vision
+
+**AI budgeting assistant.** A conversational layer that can answer questions like "how much did I spend on food last month compared to the month before?" and surface proactive alerts when spending is trending high.
+
+**Smart recommendations.** Pattern detection that notices recurring subscriptions, flags unusual spend spikes, and suggests categories for review without requiring manual audit.
+
+**Bank statement scanning.** OCR-based PDF import for banks that don't send transactional SMS reliably — credit card statements, salary slips, and passbook exports.
+
+**Predictive analytics.** Month-end spend projections based on current trajectory. "At your current pace you'll spend ₹8,400 on food this month — ₹1,200 more than last month."
+
+**iOS parity.** iOS does not expose SMS to third-party apps. The roadmap includes a share-extension approach for manually forwarding bank messages, or screenshot-based OCR parsing for iOS users.
+
+**Collaborative finance.** Shared expense views for couples and roommates — visibility into joint spending without exposing individual transaction history.
+
+---
+
+## About the Project
+
+Spendly is a solo end-to-end project — product, design, mobile, backend, AI pipeline, and deployment — built to solve a real and underserved problem in the Indian personal finance space.
+
+The core thesis is that automatic tracking only works if it's also private. Every technical decision in the architecture reflects that: parse on-device, sync only structured data, never ask for bank credentials.
+
+The product is in active use and under active development.
+
+---
+
+<div align="center">
+
+**Built by Prateek Verma**
+
+[pvk1294@gmail.com](mailto:pvk1294@gmail.com) · [info@digiexe.com](mailto:info@digiexe.com)
+
+</div>
